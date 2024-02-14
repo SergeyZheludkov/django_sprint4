@@ -1,65 +1,38 @@
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.models import User
-from django.shortcuts import get_object_or_404, redirect
-from django.urls import reverse_lazy
+from django.shortcuts import redirect
+from django.urls import reverse
 from django.views.generic import (CreateView, DeleteView, DetailView,
                                   ListView, UpdateView)
-
+from django.views.generic.detail import SingleObjectMixin
+from .cbv_mixins import (CommentUpdateDeleteMixin, PostUpdateDeleteViewMixin,
+                         RedirectProfileMixin)
 from .forms import PostForm, CommentForm
 from .models import Category, Post, Comment
-from .querysets import post_query, posts_annotate_order, posts_select_related
+from .querysets import (check_authorship, post_query, posts_annotate_order,
+                        posts_filter)
 
 # Число отображаемых на странице постов
 POSTS_NUMBER = 10
 
 
-class RedirectPostDetailMixin():
-    """Возврат на страницу публикации."""
-
-    def get_success_url(self):
-        return reverse_lazy('blog:post_detail',
-                            kwargs={'pk': self.kwargs['pk']})
-
-
-class RedirectProfileMixin():
-    """Возврат на страницу профиля."""
-
-    def get_success_url(self):
-        return reverse_lazy('blog:profile',
-                            kwargs={'username': self.request.user.username})
-
-
-class ModelPaginateMixin():
-    """Определение модели и пагинация."""
+class PostListView(ListView):
+    """Вывод списка публикаций на главной странице."""
 
     model = Post
     paginate_by = POSTS_NUMBER
-
-
-class PostListView(ModelPaginateMixin, ListView):
-    """Вывод списка публикаций на главной странице."""
-
     queryset = post_query(Post.objects)
     template_name = 'blog/index.html'
 
 
 class PostDetailView(DetailView):
-    """Вывод полной информации о публикации"""
+    """Вывод полной информации о публикации."""
 
     model = Post
     template_name = 'blog/detail.html'
 
     def get_queryset(self):
-        """Формирование необходимой выборки из БД.
-
-        Для автора публикации информация выводится для всех его постов,
-        включая снятые с публикации и с датой публикации в будущем.
-        """
-        post = get_object_or_404(Post, pk=self.kwargs['pk'])
-        if self.request.user == post.author:
-            return posts_select_related(Post.objects)
-        else:
-            return post_query(Post.objects)
+        return check_authorship(self)
 
     def get_context_data(self, **kwargs):
         """Дополнение контекста данными по комментариям."""
@@ -69,33 +42,47 @@ class PostDetailView(DetailView):
         return context
 
 
-class CategoryPostListView(ModelPaginateMixin, ListView):
+class CategoryListView(SingleObjectMixin, ListView):
     """Вывод постов определенной категории."""
 
+    paginate_by = POSTS_NUMBER
+    slug_url_kwarg = 'category_slug'
     template_name = 'blog/category.html'
 
-    def get_queryset(self):
-        """Фильтр БД постов по указанной в URL категории."""
-        queryset = post_query(Post.objects).filter(
-            category__slug=self.kwargs['category_slug']
-        )
-        return queryset
+    def get(self, request, *args, **kwargs):
+        """Выбор необходимого объекта модели Category."""
+        self.object = self.get_object(
+            Category.objects.filter(is_published=True))
+        return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
+        """Дополнение контекста объектом модели Category."""
         context = super().get_context_data(**kwargs)
-        # Дополнение контекста объектом  указанной в URL категории
-        context['category'] = get_object_or_404(
-            Category,
-            slug=self.kwargs['category_slug'],
-            is_published=True
-        )
+        context['category'] = self.object
         return context
 
+    def get_queryset(self):
+        return posts_filter(self.object.posts)
 
-class ProfileListView(ModelPaginateMixin, ListView):
+
+class ProfileListView(SingleObjectMixin, ListView):
     """Отображение страницы с профилем пользователя."""
 
+    paginate_by = POSTS_NUMBER
+    slug_field = 'username'
+    slug_url_kwarg = 'username'
     template_name = 'blog/profile.html'
+
+    def get(self, request, *args, **kwargs):
+        """Выбор необходимого объекта модели User."""
+        self.object = self.get_object(User.objects)
+        return super().get(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        """Дополнение контекста объектом модели User."""
+        context = super().get_context_data(**kwargs)
+        context['profile'] = self.object
+        return context
 
     def get_queryset(self):
         """Формирование необходимой выборки из БД.
@@ -103,53 +90,21 @@ class ProfileListView(ModelPaginateMixin, ListView):
         Для хозяина аккаунта информация выводится для его любого поста,
         включая снятые с публикации и с датой публикации в будущем.
         """
-        user = get_object_or_404(User, username=self.kwargs['username'])
-        if self.request.user.id == user.pk:
-            posts = posts_annotate_order(Post.objects)
-            return posts.filter(author_id=user.pk)
-        else:
-            return post_query(Post.objects).filter(author_id=user.pk)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        # Дополнение контекста данными по хозяину аккаунта
-        context['profile'] = get_object_or_404(
-            User, username=self.kwargs['username']
-        )
-        return context
+        if self.request.user != self.object:
+            return post_query(self.object.posts)
+        return posts_annotate_order(self.object.posts)
 
 
 class UserUpdateView(UserPassesTestMixin, RedirectProfileMixin, UpdateView):
     """Редактирование профиля пользователя."""
 
     model = User
-    fields = ['first_name', 'last_name', 'username', 'email', ]
+    fields = ('first_name', 'last_name', 'username', 'email',)
     template_name = 'blog/user.html'
 
     def test_func(self):
-        """Проверка соответствия пользователя хозяину аккаунта.
-
-        Если не совпадает, то доступ запрещен - ошибка 403.
-        """
-        return self.request.user.id == self.kwargs['pk']
-
-
-class PostUpdateView(RedirectPostDetailMixin, UpdateView):
-    """Редактирование публикации."""
-
-    model = Post
-    form_class = PostForm
-    template_name = 'blog/create.html'
-
-    def dispatch(self, request, *args, **kwargs):
-        """Проверка соответствия пользователя автору поста.
-
-        Если не совпадает, то переход на страницу поста.
-        """
-        post = get_object_or_404(Post, pk=self.kwargs['pk'])
-        if self.request.user.id != post.author_id:
-            return redirect('blog:post_detail', self.kwargs['pk'])
-        return super().dispatch(request, *args, **kwargs)
+        """Проверка соответствия пользователя хозяину аккаунта."""
+        return self.request.user == self.get_object(User.objects)
 
 
 class PostCreateView(LoginRequiredMixin, RedirectProfileMixin, CreateView):
@@ -165,20 +120,21 @@ class PostCreateView(LoginRequiredMixin, RedirectProfileMixin, CreateView):
         return super().form_valid(form)
 
 
-class PostDeleteView(UserPassesTestMixin, RedirectProfileMixin, DeleteView):
+class PostUpdateView(PostUpdateDeleteViewMixin, UpdateView):
+    """Редактирование публикации."""
+
+    def handle_no_permission(self):
+        """Переход в случае провала проверки UserPassesTestMixin.test_func."""
+        return redirect('blog:post_detail', self.object.pk)
+
+    def get_success_url(self):
+        """Возврат на страницу публикации."""
+        return reverse('blog:post_detail', kwargs={'pk': self.object.pk})
+
+
+class PostDeleteView(PostUpdateDeleteViewMixin, RedirectProfileMixin,
+                     DeleteView):
     """Удаление публикации."""
-
-    model = Post
-    post_class = PostForm
-    template_name = 'blog/create.html'
-
-    def test_func(self):
-        """Проверка соответствия пользователя автору публикации.
-
-        Если не совпадает, то доступ запрещен - ошибка 403.
-        """
-        post = get_object_or_404(Post, pk=self.kwargs['pk'])
-        return self.request.user == post.author
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -187,39 +143,25 @@ class PostDeleteView(UserPassesTestMixin, RedirectProfileMixin, DeleteView):
         return context
 
 
-class CommentCreateView(RedirectPostDetailMixin, LoginRequiredMixin,
-                        CreateView):
+class CommentCreateView(LoginRequiredMixin, CreateView):
     """Создание нового комментария (только для залогиненных пользователей)."""
 
     form = Comment
     form_class = CommentForm
 
+    def get_queryset(self):
+        return check_authorship(self)
+
     def form_valid(self, form):
-        post = get_object_or_404(Post, pk=self.kwargs['pk'])
+        post = self.get_object()
         # Автозаполнение полей, которые не выводятся на страницу
         form.instance.author = self.request.user
         form.instance.post_id = post.pk
         return super().form_valid(form)
 
-
-class CommentUpdateDeleteMixin(UserPassesTestMixin):
-    """Общие инструкции для CBV редактирования и удаления комментария."""
-
-    model = Comment
-    template_name = 'blog/comment.html'
-
-    def test_func(self):
-        """Проверка соответствия пользователя автору комментария.
-
-        Если не совпадает, то доступ запрещен - ошибка 403.
-        """
-        comment = get_object_or_404(Comment, pk=self.kwargs['pk'])
-        return self.request.user == comment.author
-
     def get_success_url(self):
         """Возврат на страницу публикации."""
-        return reverse_lazy('blog:post_detail',
-                            kwargs={'pk': self.kwargs['post_id']})
+        return reverse('blog:post_detail', kwargs={'pk': self.kwargs['pk']})
 
 
 class CommentUpdateView(CommentUpdateDeleteMixin, UpdateView):
@@ -230,5 +172,3 @@ class CommentUpdateView(CommentUpdateDeleteMixin, UpdateView):
 
 class CommentDeleteView(CommentUpdateDeleteMixin, DeleteView):
     """Удаление комментария."""
-
-    pass

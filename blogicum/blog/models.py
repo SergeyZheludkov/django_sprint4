@@ -4,14 +4,22 @@ from django.contrib.auth import get_user_model
 User = get_user_model()
 
 
-class PublishedCreatedModel(models.Model):
-    """Абстрактная модель. Добавляет поля, общие для моделей приложения."""
+class PublishedModel(models.Model):
+    """Абстрактная модель. Добавляет поле публичности записи"""
 
     is_published = models.BooleanField(
         default=True,
         verbose_name='Опубликовано',
         help_text='Снимите галочку, чтобы скрыть публикацию.'
     )
+
+    class Meta:
+        abstract = True
+
+
+class CreatedAtModel(models.Model):
+    """Абстрактная модель. Добавляет поле даты и времени создания записи."""
+
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name='Добавлено'
     )
@@ -20,7 +28,7 @@ class PublishedCreatedModel(models.Model):
         abstract = True
 
 
-class Category(PublishedCreatedModel):
+class Category(PublishedModel, CreatedAtModel):
     """Модель категории."""
 
     title = models.CharField(max_length=256, verbose_name='Заголовок')
@@ -40,7 +48,7 @@ class Category(PublishedCreatedModel):
         return self.title
 
 
-class Location(PublishedCreatedModel):
+class Location(PublishedModel, CreatedAtModel):
     """Модель местоположения."""
 
     name = models.CharField(
@@ -55,7 +63,7 @@ class Location(PublishedCreatedModel):
         return self.name
 
 
-class Post(PublishedCreatedModel):
+class Post(PublishedModel, CreatedAtModel):
     """Модель публикации."""
 
     title = models.CharField(max_length=256, verbose_name='Заголовок')
@@ -91,16 +99,20 @@ class Post(PublishedCreatedModel):
         return self.title
 
 
-class Comment(models.Model):
+class Comment(CreatedAtModel):
     """Модель комментария."""
 
-    text = models.TextField('Текст комментария')
-    post = models.ForeignKey(Post, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True)
-    author = models.ForeignKey(User, on_delete=models.CASCADE)
+    text = models.TextField(verbose_name='Текст комментария')
+    post = models.ForeignKey(Post, on_delete=models.CASCADE,
+                             verbose_name="Публикация")
+    author = models.ForeignKey(User, on_delete=models.CASCADE,
+                               verbose_name="Автор")
 
     class Meta:
         default_related_name = 'comments'
         ordering = ('created_at',)
         verbose_name = 'комментарий'
         verbose_name_plural = 'Комментарии'
+
+    def __str__(self):
+        return self.text

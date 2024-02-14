@@ -1,6 +1,8 @@
 import datetime as dt
 
-from django.db.models import Count
+from django.db.models import Count, Q
+
+from .models import Post
 
 
 def posts_select_related(posts):
@@ -28,7 +30,21 @@ def posts_annotate_order(posts):
 
 def post_query(posts):
     """Обобщенный запрос к базам данных, повторяющийся в CBV."""
-    result = posts_annotate_order(posts)
-    result = posts_select_related(result)
-    result = posts_filter(result)
-    return result
+    selected_posts = posts_annotate_order(posts)
+    selected_posts = posts_select_related(selected_posts)
+    selected_posts = posts_filter(selected_posts)
+    return selected_posts
+
+
+def check_authorship(self):
+    """Формирование необходимой выборки из БД.
+
+    Для автора публикации информация доступна для всех его постов,
+    включая снятые с публикации и с датой публикации в будущем.
+    """
+    try:
+        Post.objects.get(Q(pk=self.kwargs[self.pk_url_kwarg]) & Q(
+                         author__id=self.request.user.pk))
+        return posts_select_related(Post.objects)
+    except Post.DoesNotExist:
+        return post_query(Post.objects)
