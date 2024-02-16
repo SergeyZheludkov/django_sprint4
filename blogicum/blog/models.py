@@ -4,19 +4,6 @@ from django.contrib.auth import get_user_model
 User = get_user_model()
 
 
-class PublishedModel(models.Model):
-    """Абстрактная модель. Добавляет поле публичности записи"""
-
-    is_published = models.BooleanField(
-        default=True,
-        verbose_name='Опубликовано',
-        help_text='Снимите галочку, чтобы скрыть публикацию.'
-    )
-
-    class Meta:
-        abstract = True
-
-
 class CreatedAtModel(models.Model):
     """Абстрактная модель. Добавляет поле даты и времени создания записи."""
 
@@ -28,7 +15,20 @@ class CreatedAtModel(models.Model):
         abstract = True
 
 
-class Category(PublishedModel, CreatedAtModel):
+class PublishedCreatedAtModel(CreatedAtModel):
+    """Абстрактная модель. Добавляет поле публичности записи."""
+
+    is_published = models.BooleanField(
+        default=True,
+        verbose_name='Опубликовано',
+        help_text='Снимите галочку, чтобы скрыть публикацию.'
+    )
+
+    class Meta:
+        abstract = True
+
+
+class Category(PublishedCreatedAtModel):
     """Модель категории."""
 
     title = models.CharField(max_length=256, verbose_name='Заголовок')
@@ -48,7 +48,7 @@ class Category(PublishedModel, CreatedAtModel):
         return self.title
 
 
-class Location(PublishedModel, CreatedAtModel):
+class Location(PublishedCreatedAtModel):
     """Модель местоположения."""
 
     name = models.CharField(
@@ -63,7 +63,7 @@ class Location(PublishedModel, CreatedAtModel):
         return self.name
 
 
-class Post(PublishedModel, CreatedAtModel):
+class Post(PublishedCreatedAtModel):
     """Модель публикации."""
 
     title = models.CharField(max_length=256, verbose_name='Заголовок')
@@ -104,7 +104,7 @@ class Comment(CreatedAtModel):
 
     text = models.TextField(verbose_name='Текст комментария')
     post = models.ForeignKey(Post, on_delete=models.CASCADE,
-                             verbose_name="Публикация")
+                             verbose_name='Публикация')
     author = models.ForeignKey(User, on_delete=models.CASCADE,
                                verbose_name="Автор")
 

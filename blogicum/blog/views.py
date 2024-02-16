@@ -1,16 +1,16 @@
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib.auth.models import User
-from django.shortcuts import redirect
+from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.views.generic import (CreateView, DeleteView, DetailView,
                                   ListView, UpdateView)
 from django.views.generic.detail import SingleObjectMixin
-from .cbv_mixins import (CommentUpdateDeleteMixin, PostUpdateDeleteViewMixin,
-                         RedirectProfileMixin)
+
+from .cbv_mixins import (CheckAuthorshipMixin, CommentUpdateDeleteMixin,
+                         PostUpdateDeleteViewMixin, RedirectProfileMixin)
 from .forms import PostForm, CommentForm
 from .models import Category, Post, Comment
-from .querysets import (check_authorship, post_query, posts_annotate_order,
-                        posts_filter)
+from .querysets import post_query, posts_annotate_order, posts_filter
 
 # Число отображаемых на странице постов
 POSTS_NUMBER = 10
@@ -25,14 +25,11 @@ class PostListView(ListView):
     template_name = 'blog/index.html'
 
 
-class PostDetailView(DetailView):
+class PostDetailView(CheckAuthorshipMixin, DetailView):
     """Вывод полной информации о публикации."""
 
     model = Post
     template_name = 'blog/detail.html'
-
-    def get_queryset(self):
-        return check_authorship(self)
 
     def get_context_data(self, **kwargs):
         """Дополнение контекста данными по комментариям."""
@@ -123,10 +120,6 @@ class PostCreateView(LoginRequiredMixin, RedirectProfileMixin, CreateView):
 class PostUpdateView(PostUpdateDeleteViewMixin, UpdateView):
     """Редактирование публикации."""
 
-    def handle_no_permission(self):
-        """Переход в случае провала проверки UserPassesTestMixin.test_func."""
-        return redirect('blog:post_detail', self.object.pk)
-
     def get_success_url(self):
         """Возврат на страницу публикации."""
         return reverse('blog:post_detail', kwargs={'pk': self.object.pk})
@@ -143,17 +136,14 @@ class PostDeleteView(PostUpdateDeleteViewMixin, RedirectProfileMixin,
         return context
 
 
-class CommentCreateView(LoginRequiredMixin, CreateView):
+class CommentCreateView(LoginRequiredMixin, CheckAuthorshipMixin, CreateView):
     """Создание нового комментария (только для залогиненных пользователей)."""
 
     form = Comment
     form_class = CommentForm
 
-    def get_queryset(self):
-        return check_authorship(self)
-
     def form_valid(self, form):
-        post = self.get_object()
+        post = get_object_or_404(self.get_queryset(), pk=self.kwargs['pk'])
         # Автозаполнение полей, которые не выводятся на страницу
         form.instance.author = self.request.user
         form.instance.post_id = post.pk

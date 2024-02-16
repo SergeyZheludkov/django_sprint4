@@ -11,21 +11,21 @@ app_name = 'blog'
 extra_patterns_posts_pk = [
     path('', views.PostDetailView.as_view(), name='post_detail'),
     path('edit/', views.PostUpdateView.as_view(), name='edit_post'),
-    path('delete/', views.PostDeleteView.as_view(), name="delete_post"),
-    path('comment/', views.CommentCreateView.as_view(), name="add_comment"),
+    path('delete/', views.PostDeleteView.as_view(), name='delete_post'),
+    path('comment/', views.CommentCreateView.as_view(), name='add_comment'),
 ]
 
 extra_patterns_post_id = [
-    path('edit_comment/<int:pk>/', views.CommentUpdateView.as_view(),
+    path('edit_comment/<int:comment_id>/', views.CommentUpdateView.as_view(),
          name='edit_comment'),
-    path('delete_comment/<int:pk>/', views.CommentDeleteView.as_view(),
+    path('delete_comment/<int:comment_id>/', views.CommentDeleteView.as_view(),
          name='delete_comment'),
 ]
 
 extra_patterns_posts = [
     path('<int:pk>/', include(extra_patterns_posts_pk)),
     path('create/', views.PostCreateView.as_view(), name='create_post'),
-    path('<post_id>/', include(extra_patterns_post_id)),
+    path('<int:pk>/', include(extra_patterns_post_id)),
 ]
 
 urlpatterns = [
